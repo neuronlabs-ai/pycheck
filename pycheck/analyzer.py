@@ -109,13 +109,17 @@ def analyze_file(filepath: str) -> Tuple[List[dict], List[str]]:
     source_lines = source.split('\n')
     tree = ast.parse(source, filename=filepath)
     
-    # Phase 1: Rule-based AST analysis
-    analyzer = PyCheckAnalyzer(source_lines, filepath)
-    analyzer.visit(tree)
-    
-    # Phase 2: Data flow taint analysis
+    # Phase 1: Data flow taint & provenance analysis
     tracker = TaintTracker()
     flow_diagnostics = tracker.analyze(tree, source_lines)
+    
+    # Phase 2: Rule-based AST analysis (with provenance populated in ctx)
+    analyzer = PyCheckAnalyzer(source_lines, filepath)
+    analyzer.ctx.tainted_vars = {k: v.reason for k, v in tracker.tainted_vars.items()}
+    analyzer.ctx.train_vars = tracker.train_vars
+    analyzer.ctx.test_vars = tracker.test_vars
+    analyzer.ctx.test_contaminated_vars = tracker.test_contaminated_vars
+    analyzer.visit(tree)
     
     # Combine and deduplicate
     all_diagnostics = analyzer.diagnostics + flow_diagnostics

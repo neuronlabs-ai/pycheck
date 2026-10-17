@@ -30,3 +30,9 @@ env/
 # OS files
 .DS_Store
 Thumbs.db
+
+# VS Code extension build artifacts
+pycheck-vscode/node_modules/
+pycheck-vscode/out/
+*.vsix
+
