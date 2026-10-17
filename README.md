@@ -62,7 +62,7 @@ PyCheck catches all three before execution:
 
 ## What It Catches
 
-### Temporal Leak Rules (15 rules — `T001`–`T015`)
+### Temporal Leak Rules (17 rules — `T001`–`T017`)
 
 | Rule | What It Catches | Severity |
 |------|----------------|----------|
@@ -81,6 +81,8 @@ PyCheck catches all three before execution:
 | `T013` | `.resample()` on full dataset before split | Warning |
 | `T014` | `.diff(-5)` — future difference computation | **Error** |
 | `T015` | Negative `.shift()` inside `groupby().transform()` | **Error** |
+| `T016` | `pd.merge_asof()` with `direction='nearest'` or `'forward'` | **Error** |
+| `T017` | Target laundering & un-split target encoding (`regime_success_rate`) | **Error** |
 
 ### Causal Confusion Rules (7 rules — `C001`–`C007`)
 

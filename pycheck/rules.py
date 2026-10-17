@@ -311,11 +311,22 @@ class T010_FitBeforeSplit(Rule):
     severity = "error"
     category = "TemporalLeak"
 
+    def _is_train_data(self, node):
+        """Recursively check if an AST node represents training data."""
+        train_markers = ('_train', 'train_', 'x_train', 'y_train', 'x_tr', 'y_tr', '_trn', 'trn_', 'train')
+        if isinstance(node, ast.Name):
+            return any(m in node.id.lower() for m in train_markers)
+        if isinstance(node, ast.Subscript):
+            return self._is_train_data(node.value)
+        if isinstance(node, ast.Attribute):
+            return self._is_train_data(node.value)
+        return False
+
     def check_node(self, node, ctx):
         if not isinstance(node, ast.Call):
             return []
-        if isinstance(node.func, ast.Attribute) and node.func.attr == 'fit':
-            # Only flag .fit() on objects that look like ML preprocessors/models
+        if isinstance(node.func, ast.Attribute) and node.func.attr in ('fit', 'fit_transform'):
+            # Only flag on objects that look like ML preprocessors/models
             # Skip: fig.fit(), layout.fit(), etc.
             obj_name = self._get_obj_name(node.func.value)
             safe_objects = {'fig', 'figure', 'ax', 'axes', 'plt', 'layout',
@@ -323,25 +334,22 @@ class T010_FitBeforeSplit(Rule):
                             'parser', 'formatter', 'logger', 'handler'}
             if obj_name and obj_name.lower() in safe_objects:
                 return []
+            
             # Suppress if all positional arguments are clearly train-only variables
-            # (names containing _train, train_, X_tr, y_tr, etc.)
-            train_markers = ('_train', 'train_', 'X_tr', 'y_tr', '_trn', 'trn_')
-            if node.args:
-                all_train = all(
-                    isinstance(a, ast.Name) and any(m in a.id for m in train_markers)
-                    for a in node.args
-                )
-                if all_train:
-                    return []
-            return [Diagnostic(
-                node.lineno, node.col_offset, "warning", self.code,
-                ".fit() may be called on the full dataset including test data",
-                "Call .fit() only on training data, use .transform() on test data")]
-        if isinstance(node.func, ast.Attribute) and node.func.attr == 'fit_transform':
-            return [Diagnostic(
-                node.lineno, node.col_offset, self.severity, self.code,
-                ".fit_transform() on full dataset leaks test statistics into training",
-                "Use .fit(X_train).transform(X_train), then .transform(X_test) separately")]
+            # (e.g. X_train, y_train, train_df[features], X_tr)
+            if node.args and all(self._is_train_data(a) for a in node.args):
+                return []
+
+            if node.func.attr == 'fit':
+                return [Diagnostic(
+                    node.lineno, node.col_offset, "warning", self.code,
+                    ".fit() may be called on the full dataset including test data",
+                    "Call .fit() only on training data, use .transform() on test data")]
+            else:
+                return [Diagnostic(
+                    node.lineno, node.col_offset, self.severity, self.code,
+                    ".fit_transform() on full dataset leaks test statistics into training",
+                    "Use .fit(X_train).transform(X_train), then .transform(X_test) separately")]
         return []
 
     def _get_obj_name(self, node):
@@ -507,6 +515,56 @@ class T016_MergeAsofDirection(Rule):
         return []
 
 
+class T017_TargetLaundering(Rule):
+    code = "T017"
+    name = "target_laundering_leak"
+    severity = "error"
+    category = "TemporalLeak"
+
+    def check_node(self, node, ctx):
+        target_col_names = {'target', 'success', 'outcome', 'label', 'labels', 'y',
+                            'profit', 'pnl', 'win', 'return', 'returns', 'future_price'}
+        
+        # 1. Detect target encoding / aggregation: df.groupby(...)['target'].transform('mean')
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in ('TargetEncoder', 'CatBoostEncoder'):
+                return [Diagnostic(
+                    node.lineno, node.col_offset, self.severity, self.code,
+                    f"{node.func.id}() calculates target statistics across groups; ensure it is fit ONLY on training data",
+                    "Fit target encoders strictly on X_train, y_train after temporal splitting")]
+            
+            if isinstance(node.func, ast.Attribute) and node.func.attr in ('transform', 'mean', 'median', 'std', 'sum', 'agg', 'apply'):
+                val = node.func.value
+                col_name = None
+                groupby_call = None
+                
+                if isinstance(val, ast.Subscript):
+                    if isinstance(val.slice, ast.Constant) and isinstance(val.slice.value, str):
+                        col_name = val.slice.value.lower()
+                    groupby_call = val.value
+                elif isinstance(val, ast.Call):
+                    groupby_call = val
+                
+                if col_name and any(t in col_name for t in target_col_names):
+                    if isinstance(groupby_call, ast.Call) and isinstance(groupby_call.func, ast.Attribute) and groupby_call.func.attr == 'groupby':
+                        return [Diagnostic(
+                            node.lineno, node.col_offset, self.severity, self.code,
+                            f"Target laundering: grouping by target/outcome column '{col_name}' leaks future labels into features",
+                            "Compute regime/group statistics strictly on training data after splitting")]
+
+        # 2. Detect assignment creating laundered columns: df['regime_success_rate'] = ...
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant) and isinstance(target.slice.value, str):
+                    col = target.slice.value.lower()
+                    if any(marker in col for marker in ('success_rate', 'target_enc', 'target_mean', 'regime_success')):
+                        return [Diagnostic(
+                            node.lineno, node.col_offset, self.severity, self.code,
+                            f"Target laundering: column '{target.slice.value}' encodes target outcomes across full dataset",
+                            "Calculate success rates and target statistics only on the training set")]
+        return []
+
+
 # ═══════════════════════════════════════════════════════════════
 #  CAUSAL CONFUSION RULES (C001–C010)
 # ═══════════════════════════════════════════════════════════════
@@ -540,14 +598,16 @@ class C002_TargetInFeatures(Rule):
         # Detect df[['feature1', 'target']] where target-like names are used as features
         if isinstance(node.slice, ast.List):
             target_names = {'target', 'y', 'label', 'labels', 'outcome', 'y_true',
-                            'future_price', 'future_return', 'next_close', 'next_price'}
+                            'future_price', 'future_return', 'next_close', 'next_price',
+                            'regime_success_rate', 'success_rate'}
             for elt in node.slice.elts:
                 if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                    if elt.value.lower() in target_names:
+                    val = elt.value.lower()
+                    if val in target_names or val.endswith('_success_rate') or val.endswith('_target_enc'):
                         return [Diagnostic(
                             node.lineno, node.col_offset, self.severity, self.code,
-                            f"Column '{elt.value}' appears to be a target variable used as a feature",
-                            "Remove target/outcome columns from feature inputs to avoid data leakage")]
+                            f"Column '{elt.value}' appears to be a target or target-laundered variable used as a feature",
+                            "Remove target/outcome and target-laundered columns from feature inputs to avoid data leakage")]
         return []
 
 
@@ -854,6 +914,7 @@ ALL_RULES: List[Rule] = [
     T014_DiffNegative(),
     T015_GroupbyShiftLeak(),
     T016_MergeAsofDirection(),
+    T017_TargetLaundering(),
     # Causal Confusion
     C001_CorrelationCausation(),
     C002_TargetInFeatures(),

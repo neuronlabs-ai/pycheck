@@ -468,4 +468,51 @@ merged = pd.merge_asof(left, right, on='ts', direction='backward')
             diags.extend(rule.check_node(node, None))
         assert not diags, "merge_asof with direction='backward' must not trigger any diagnostic"
 
+    def test_t010_scaler_on_train_data_clean(self):
+        code = """
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+scaler.fit(X_train[features])
+model.fit(X_train, y_train)
+"""
+        tree = ast.parse(code)
+        from pycheck.rules import T010_FitBeforeSplit
+        rule = T010_FitBeforeSplit()
+        diags = []
+        for node in ast.walk(tree):
+            diags.extend(rule.check_node(node, None))
+        assert not diags, f"Fitting or fit_transforming on training data must not trigger T010, got: {diags}"
+
+    def test_t010_scaler_on_full_dataset_flagged(self):
+        code = """
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(df)
+"""
+        tree = ast.parse(code)
+        from pycheck.rules import T010_FitBeforeSplit
+        rule = T010_FitBeforeSplit()
+        diags = []
+        for node in ast.walk(tree):
+            diags.extend(rule.check_node(node, None))
+        assert any(d.code == "T010" for d in diags), "fit_transform on full dataset must trigger T010"
+
+    def test_t017_regime_success_rate_target_laundering(self):
+        code = """
+df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
+df['regime_success_rate'] = df.groupby('regime')['target'].transform('mean')
+X = df[['volatility', 'regime_success_rate']]
+"""
+        tree = ast.parse(code)
+        from pycheck.rules import T017_TargetLaundering, C002_TargetInFeatures
+        t017 = T017_TargetLaundering()
+        c002 = C002_TargetInFeatures()
+        diags = []
+        for node in ast.walk(tree):
+            diags.extend(t017.check_node(node, None))
+            diags.extend(c002.check_node(node, None))
+        assert any(d.code == "T017" for d in diags), "Target groupby aggregation must trigger T017"
+        assert any(d.code == "C002" for d in diags), "regime_success_rate feature selection must trigger C002"
+
 
