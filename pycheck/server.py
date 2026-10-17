@@ -145,6 +145,46 @@ class PyCheckCloudHandler(BaseHTTPRequestHandler):
             )
             self._send_json(200, cert)
 
+        elif self.path == "/webhook/stripe":
+            # Stripe Event Webhook (e.g. checkout.session.completed, invoice.paid)
+            event_type = payload.get("type", "unknown")
+            data_object = payload.get("data", {}).get("object", {})
+
+            customer_email = data_object.get("customer_email") or data_object.get("customer_details", {}).get("email", "")
+            org_name = data_object.get("client_reference_id") or "default_org"
+
+            # Generate active production license key
+            raw_seed = f"{customer_email}:{org_name}:{event_type}".encode("utf-8")
+            license_hex = hashlib.sha256(raw_seed).hexdigest()[:12].upper()
+            license_key = f"PYCHECK-PRO-{license_hex[:4]}-{license_hex[4:8]}-{license_hex[8:]}"
+
+            self._send_json(200, {
+                "received": True,
+                "event_type": event_type,
+                "status": "PROVISIONED",
+                "organization": org_name,
+                "email": customer_email,
+                "license_key": license_key,
+                "pr_gatekeeper_active": True
+            })
+
+        elif self.path == "/api/v1/billing/create-checkout":
+            # Generates Stripe Checkout redirection link
+            email = payload.get("email", "")
+            org = payload.get("organization", "my-org")
+            seats = int(payload.get("seats", 5))
+            cycle = payload.get("cycle", "monthly")
+
+            stripe_payment_link = os.getenv("STRIPE_PAYMENT_LINK", "https://buy.stripe.com/test_pycheck_team_pro")
+            checkout_url = f"{stripe_payment_link}?prefilled_email={email}&client_reference_id={org}&quantity={seats}"
+
+            self._send_json(200, {
+                "checkout_url": checkout_url,
+                "seats": seats,
+                "cycle": cycle,
+                "plan": "team_pro"
+            })
+
         else:
             self._send_json(404, {"error": "Unknown API route"})
 
