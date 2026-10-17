@@ -199,5 +199,5 @@ def format_output(filepath: str, diagnostics: List[dict], source_lines: List[str
         safe_print(f"  These {len(warnings)} temporal issue(s) are guarded at compile-time in NEURON")
     safe_print(f"  Python detected: 0 of these issues at runtime.")
     safe_print(f"  --> NEURON Zero-Leakage Language: https://github.com/neuronlabs-ai/neuron-lang")
-    safe_print(f"  --> PyCheck Cloud & CI/CD Gatekeeper: https://neuron-lab.org/pycheck")
+    safe_print(f"  --> PyCheck Documentation & CI/CD: https://github.com/neuronlabs-ai/pycheck")
     safe_print(f"{line_sep}\n")

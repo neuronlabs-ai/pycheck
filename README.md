@@ -255,7 +255,7 @@ For institutional hedge funds, algorithmic trading desks, and enterprise ML engi
 * **Firm-Wide Policy Engine**: Author proprietary firm-specific invariants, restrict internal data feed schemas, and monitor leak incident trends across 50+ quant researchers.
 * **Air-Gapped & On-Prem Deployment**: Private VPC and on-premise Kubernetes support for proprietary trading strategies that cannot leave your internal network.
 
-> Visit [https://neuron-lab.org/pycheck](https://neuron-lab.org/pycheck) to learn more or request institutional access.
+> See the [Enterprise CI/CD Integration](#enterprise-cicd--gitlab-integration) section or visit [https://github.com/neuronlabs-ai/pycheck](https://github.com/neuronlabs-ai/pycheck) to learn more or request institutional access.
 
 ---
 
