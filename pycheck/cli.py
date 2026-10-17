@@ -179,8 +179,9 @@ def main():
                     print(f"  These {total_errors} error(s) would be COMPILE-TIME ERRORS in NEURON")
                 elif total_warnings > 0:
                     print(f"  These {total_warnings} temporal issue(s) are guarded at compile-time in NEURON")
-                print("  Explore the zero-leakage language: https://github.com/neuronlabs-ai/neuron-lang")
-                print("  Python detected: 0 of these issues at runtime")
+                print("  Python detected: 0 of these issues at runtime.")
+                print("  --> NEURON Zero-Leakage Language: https://github.com/neuronlabs-ai/neuron-lang")
+                print("  --> PyCheck Cloud & CI/CD Gatekeeper: https://neuron-lab.org/pycheck")
             print("=================================================================\n")
 
     if total_errors > 0:
