@@ -1,6 +1,6 @@
 # PyCheck — ML Safety Analyzer
 
-**32 rules. Zero dependencies. Catches the bugs that cost millions.**
+**33 rules. Zero dependencies. Catches the bugs that cost millions.**
 
 PyCheck is a static AST analyzer that detects **temporal lookahead bias**, **causal confusion**, and **unguarded uncertainty** in Python ML and trading scripts — before you run a single line of code.
 
@@ -30,7 +30,7 @@ PyCheck catches all three before execution:
 =================================================================
   PyCheck — NEURON ML Safety Analyzer
   Scanning: strategy.py
-  Rules: 32 active + Data Flow & Provenance Engine
+  Rules: 33 active + Data Flow & Provenance Engine
 =================================================================
 
   ERROR[T001]: .shift(-1) accesses data 1 rows INTO THE FUTURE
@@ -62,12 +62,12 @@ PyCheck catches all three before execution:
 
 ## What It Catches
 
-### Temporal Leak Rules (17 rules — `T001`–`T017`)
+### Temporal Leak Rules (18 rules — `T001`–`T018`)
 
 | Rule | What It Catches | Severity |
 |------|----------------|----------|
 | `T001` | `.shift(-1)` — accessing future data | **Error** |
-| `T002` | `train_test_split()` on time-series data | **Error** |
+| `T002` | `train_test_split()` on time-series data without chronological ordering | **Error** |
 | `T003` | `.rolling()` computed before the train/test split | Warning |
 | `T004` | `.expanding()` computed before split | Warning |
 | `T005` | `.pct_change(-1)` — future percent returns | **Error** |
@@ -83,6 +83,7 @@ PyCheck catches all three before execution:
 | `T015` | Negative `.shift()` inside `groupby().transform()` | **Error** |
 | `T016` | `pd.merge_asof()` with `direction='nearest'` or `'forward'` | **Error** |
 | `T017` | Target laundering & un-split target encoding (`regime_success_rate`) | **Error** |
+| `T018` | In-sample target encoding via `.transform()` or un-split group means | **Error** |
 
 ### Causal Confusion Rules (7 rules — `C001`–`C007`)
 
@@ -150,9 +151,33 @@ pycheck script.py              # Errors + warnings (default)
 pycheck script.py --info       # Include info-level diagnostics
 pycheck script.py --quiet      # Errors only
 pycheck script.py --json       # JSON output — pipe into CI/CD
-pycheck --list                 # List all 32 rules
+pycheck --list                 # List all 33 rules
 pycheck --help
 ```
+
+### Inline Rule Suppression
+
+PyCheck supports standard inline suppression comments with audit reason annotations:
+
+```python
+# Specific rule suppression
+df['target'] = df['close'].shift(-1)  # pycheck: ignore[T001]
+
+# Multi-rule suppression with audit justification
+signal = df[['close', 'target']].corr()  # pycheck: ignore[C001, C002] reason: exploratory EDA baseline
+
+# Blanket ignore or flake8-style noqa
+cv = KFold(n_splits=5, shuffle=True)  # pycheck: ignore
+X_tr = scaler.fit_transform(X)         # noqa: T010
+```
+
+Both same-line trailing comments and line-above comments are supported.
+
+### Sink-Gated Precision Engine
+
+To prevent false alarms during research and exploratory data analysis (EDA), PyCheck uses **AST sink-gating**:
+- Exploratory display calls like `df[['feature', 'target']].head()`, `.plot()`, `.describe()`, and `print(...)` are recognized as safe inspection and will **never** trigger feature leakage (`C002`).
+- The rule strictly guards actual modeling sinks (`X = ...`, `model.fit(...)`, `cross_validate(...)`).
 
 ### JSON Output (CI/CD Integration)
 
