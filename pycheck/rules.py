@@ -127,11 +127,35 @@ class T002_TrainTestSplit(Rule):
         if name == 'train_test_split':
             ctx.has_train_test_split = True
             ctx.split_line = node.lineno
+
+            # 1. Explicit shuffle=False is a safe chronological sequential split
+            for kw in node.keywords:
+                if kw.arg == 'shuffle':
+                    if isinstance(kw.value, ast.Constant) and (kw.value.value is False or kw.value.value == 0):
+                        return []
+
+            # 2. Only flag when time-series indicators exist in the data/script
+            if not self._has_temporal_context(ctx):
+                return []
+
             return [Diagnostic(
                 node.lineno, node.col_offset, self.severity, self.code,
                 "train_test_split() shuffles time-series data, leaking future into training",
-                "Use a temporal split: train = data[:split_idx], test = data[split_idx:]")]
+                "Use a temporal split: train = data[:split_idx], test = data[split_idx:], or set shuffle=False")]
         return []
+
+    def _has_temporal_context(self, ctx):
+        if not ctx or not ctx.source_lines:
+            return False
+        source_lower = "\n".join(ctx.source_lines).lower()
+        temporal_markers = (
+            'close', 'open', 'high', 'low', 'volume', 'vwap', 'ohlc',
+            'price', 'prices', 'return', 'returns', 'pnl', 'tick', 'bar',
+            'date', 'datetime', 'timestamp', 'time_series', 'timeseries',
+            'rolling', 'expanding', 'shift', 'pct_change', 'diff',
+            'resample', 'timeseriessplit', 'merge_asof'
+        )
+        return any(marker in source_lower for marker in temporal_markers)
 
     def _get_call_name(self, node):
         if isinstance(node.func, ast.Name):
@@ -544,14 +568,14 @@ class T017_TargetLaundering(Rule):
     def check_node(self, node, ctx):
         target_col_names = {'target', 'success', 'outcome', 'label', 'labels', 'y',
                             'profit', 'pnl', 'win', 'return', 'returns', 'future_price'}
-        train_markers = ('_train', 'train_', 'x_train', 'y_train', 'x_tr', 'y_tr', '_trn', 'trn_', 'train')
+        train_markers = ('_train', 'train_', 'x_train', 'y_train', 'x_tr', 'y_tr', '_trn', 'trn_', 'train', 'fit', 'fit_', '_fit', 'trn')
         test_markers = ('_test', 'test_', 'x_test', 'y_test', 'x_val', 'y_val', '_val', 'val_', '_eval', 'eval_', 'holdout', 'validation')
         
         # 1. Detect target encoding / aggregation: df.groupby(...)['target'].transform('mean')
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in ('TargetEncoder', 'CatBoostEncoder'):
                 return [Diagnostic(
-                    node.lineno, node.col_offset, self.severity, self.code,
+                    node.lineno, node.col_offset, "info", self.code,
                     f"{node.func.id}() calculates target statistics across groups; ensure it is fit ONLY on training data",
                     "Fit target encoders strictly on X_train, y_train after temporal splitting")]
             
@@ -624,6 +648,99 @@ class T017_TargetLaundering(Rule):
                             node.lineno, node.col_offset, self.severity, self.code,
                             f"Target laundering: column '{target.slice.value}' encodes target outcomes across full dataset",
                             "Calculate success rates and target statistics only on the training set")]
+        return []
+
+
+class T018_InSampleTargetEncoding(Rule):
+    code = "T018"
+    name = "insample_target_encoding"
+    severity = "error"
+    category = "TemporalLeak"
+
+    def check_node(self, node, ctx):
+        target_col_names = {'target', 'success', 'outcome', 'label', 'labels', 'y',
+                            'profit', 'pnl', 'win', 'return', 'returns', 'future_price', 'default'}
+
+        if isinstance(node, ast.Call):
+            # 1. Detect TargetEncoder(cv=None) or cv=1
+            if isinstance(node.func, ast.Name) and node.func.id in ('TargetEncoder', 'CatBoostEncoder', 'WOEEncoder'):
+                for kw in node.keywords:
+                    if kw.arg == 'cv':
+                        if (isinstance(kw.value, ast.Constant) and (kw.value.value is None or kw.value.value == 1)) or \
+                           (isinstance(kw.value, ast.Name) and kw.value.id in ('None',)):
+                            return [Diagnostic(
+                                node.lineno, node.col_offset, self.severity, self.code,
+                                f"{node.func.id}(cv=None) disables out-of-fold cross-validation; target statistics will leak in-sample labels into features",
+                                "Set cv>=5 (e.g. TargetEncoder(cv=5)) to enforce out-of-fold target encoding")]
+
+            # 2. Detect groupby on target with transform('mean'/'median'/'std'/'var')
+            # e.g.: train['cat_enc'] = train.groupby('category')['target'].transform('mean')
+            if isinstance(node.func, ast.Attribute) and node.func.attr == 'transform':
+                val = node.func.value
+                col_name = None
+                groupby_call = None
+
+                if isinstance(val, ast.Subscript):
+                    if isinstance(val.slice, ast.Constant) and isinstance(val.slice.value, str):
+                        col_name = val.slice.value.lower()
+                    groupby_call = val.value
+                elif isinstance(val, ast.Call):
+                    groupby_call = val
+
+                if col_name and any(t in col_name for t in target_col_names):
+                    if isinstance(groupby_call, ast.Call) and isinstance(groupby_call.func, ast.Attribute) and groupby_call.func.attr == 'groupby':
+                        agg_func = None
+                        if node.args:
+                            arg0 = node.args[0]
+                            if isinstance(arg0, ast.Constant) and isinstance(arg0.value, str):
+                                agg_func = arg0.value.lower()
+                            elif isinstance(arg0, ast.Attribute):
+                                agg_func = arg0.attr.lower()
+                            elif isinstance(arg0, ast.Name):
+                                agg_func = arg0.id.lower()
+
+                        if agg_func in ('mean', 'median', 'std', 'var'):
+                            return [Diagnostic(
+                                node.lineno, node.col_offset, self.severity, self.code,
+                                f"In-sample target encoding leak: groupby.transform('{agg_func}') on target '{col_name}' includes row i's own label in feature i",
+                                "Use Out-of-Fold (OOF) K-Fold target encoding or Leave-One-Out smoothing: ((group_sum - y) / (count - 1)) to prevent target memorization")]
+
+            # 3. Detect mapping naive groupby target mean onto the SAME rows:
+            # e.g.: train['cat_enc'] = train['cat'].map(train.groupby('cat')['target'].mean())
+            if isinstance(node.func, ast.Attribute) and node.func.attr == 'map':
+                if node.args:
+                    arg = node.args[0]
+                    if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute) and arg.func.attr in ('mean', 'median', 'std', 'var'):
+                        call_val = arg.func.value
+                        if isinstance(call_val, ast.Subscript):
+                            if isinstance(call_val.slice, ast.Constant) and isinstance(call_val.slice.value, str):
+                                if any(t in call_val.slice.value.lower() for t in target_col_names):
+                                    gb = call_val.value
+                                    if isinstance(gb, ast.Call) and isinstance(gb.func, ast.Attribute) and gb.func.attr == 'groupby':
+                                        # Extract receiver DF and source DF
+                                        map_df_name = ""
+                                        if isinstance(node.func.value, ast.Subscript):
+                                            if isinstance(node.func.value.value, ast.Name):
+                                                map_df_name = node.func.value.value.id.lower()
+                                        elif isinstance(node.func.value, ast.Name):
+                                            map_df_name = node.func.value.id.lower()
+
+                                        gb_df_name = ""
+                                        if isinstance(gb.func.value, ast.Name):
+                                            gb_df_name = gb.func.value.id.lower()
+
+                                        # If applying to a different holdout/validation/test partition (e.g. test vs train, val vs fit in OOF),
+                                        # this is legitimate out-of-fold inference! Do NOT flag as self-target leakage.
+                                        test_val_markers = ('test', 'val', 'valid', 'holdout', 'eval', 'inference')
+                                        if any(m in map_df_name for m in test_val_markers) and map_df_name != gb_df_name:
+                                            return []
+                                        if map_df_name and gb_df_name and map_df_name != gb_df_name:
+                                            return []
+
+                                        return [Diagnostic(
+                                            node.lineno, node.col_offset, self.severity, self.code,
+                                            f"In-sample target encoding leak: mapping naive group target mean onto same rows leaks each row's own outcome into its feature",
+                                            "Compute target statistics out-of-fold (OOF) across cross-validation splits, or use leave-one-out smoothing")]
         return []
 
 
@@ -993,6 +1110,7 @@ ALL_RULES: List[Rule] = [
     T015_GroupbyShiftLeak(),
     T016_MergeAsofDirection(),
     T017_TargetLaundering(),
+    T018_InSampleTargetEncoding(),
     # Causal Confusion
     C001_CorrelationCausation(),
     C002_TargetInFeatures(),
