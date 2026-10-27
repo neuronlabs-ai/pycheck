@@ -60,7 +60,7 @@ df['future_signal'] = df['close'].shift(-1)
 def test_cli_gitlab_output_file():
     test_code = """
 import pandas as pd
-df['roll'] = df['price'].rolling(10).mean()
+df['roll'] = df['val'].rolling(10).mean()
 """
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
         f.write(test_code)

@@ -4,6 +4,26 @@ All notable changes to `pycheck-neuron` are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.0] — 2026-10-27
+
+### Added
+- **Shuffled Cross-Validation Detection (T020, T021, T022)**:
+  - `T020_ShuffledCVSortedData`: Flags `KFold(shuffle=True)` and `StratifiedKFold(shuffle=True)` applied to chronologically sorted / time-series datasets where future observations contaminate validation folds.
+  - `T021_CalibratedCVShuffled`: Flags `CalibratedClassifierCV` initialized without a temporal CV splitter on time-series datasets.
+  - `T022_CrossValPredictShuffled`: Flags `cross_val_predict` generating out-of-fold predictions using shuffled cross-validation on temporal series.
+- **Rule Expansion & Modernized Auditing**:
+  - Expanded active ruleset from 34 to 37 rules across Temporal, Causal, and Uncertainty dimensions.
+  - Added dedicated regression suite (`tests/test_regression.py`) covering all newly registered rules and edge cases.
+
+### Fixed
+- **Audit Findings & Precision Hardening**:
+  - Resolved `T012` ↔ `T020` diagnostic double-fire on `StratifiedKFold(shuffle=True)`.
+  - Scoped `_has_temporal_context` strictly to temporal/datetime columns, preventing false alarms on non-temporal dataframe sorting.
+  - Made `_is_final_refit` position-aware so full-dataset `.fit()` calls are only classified as final refits if preceded by holdout evaluations.
+  - Fixed `_has_temporal_context` return contract to strictly return boolean `False`.
+  - Removed dead `D001_DropNaBeforeSplit` placeholder class.
+  - Consolidated duplicate `_get_negative_value` methods into the shared `Rule` base class.
+
 ## [1.0.8] — 2026-10-24
 
 ### Changed

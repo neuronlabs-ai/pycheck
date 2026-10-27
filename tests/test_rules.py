@@ -106,7 +106,12 @@ class TestT002:
 
 class TestT003:
     def test_fires_on_rolling(self):
-        _check(T003_RollingBeforeSplit(), "df['sma'] = df['close'].rolling(14).mean()", expect_hit=True)
+        # Use non-temporal column name; temporal columns like 'close' are now suppressed
+        _check(T003_RollingBeforeSplit(), "df['sma'] = df['val'].rolling(14).mean()", expect_hit=True)
+
+    def test_suppressed_on_temporal_column(self):
+        # Rolling on financial columns like 'close' is recognized as a causal trailing indicator
+        _check(T003_RollingBeforeSplit(), "df['sma'] = df['close'].rolling(14).mean()", expect_hit=False)
 
     def test_silent_on_mean(self):
         _check(T003_RollingBeforeSplit(), "x = df['close'].mean()", expect_hit=False)
@@ -114,7 +119,12 @@ class TestT003:
 
 class TestT004:
     def test_fires_on_expanding(self):
-        _check(T004_ExpandingBeforeSplit(), "df['cum'] = df['close'].expanding().max()", expect_hit=True)
+        # Use non-temporal column name; temporal columns like 'close' are now suppressed
+        _check(T004_ExpandingBeforeSplit(), "df['cum'] = df['val'].expanding().max()", expect_hit=True)
+
+    def test_suppressed_on_temporal_column(self):
+        # Expanding on financial columns is recognized as a causal cumulative statistic
+        _check(T004_ExpandingBeforeSplit(), "df['cum'] = df['close'].expanding().max()", expect_hit=False)
 
     def test_silent_on_cumsum(self):
         _check(T004_ExpandingBeforeSplit(), "x = df['close'].cumsum()", expect_hit=False)
@@ -467,7 +477,7 @@ model.fit(X, c)
 
 class TestIntegration:
     def test_rule_count(self):
-        assert len(ALL_RULES) == 34, f"Expected exactly 34 rules, got {len(ALL_RULES)}"
+        assert len(ALL_RULES) == 37, f"Expected exactly 37 rules, got {len(ALL_RULES)}"
 
     def test_all_rules_have_code(self):
         for rule in ALL_RULES:
@@ -744,7 +754,7 @@ class TestStressFalsePositives:
 
     # C7: KFold should still fire when temporal markers are present
     def test_t012_fires_on_temporal_data(self):
-        code = "df['close'] = prices\ncv = KFold(n_splits=5, shuffle=True)"
+        code = "df['close'] = prices\ncv = KFold(n_splits=5)"
         tree = ast.parse(code)
         for parent in ast.walk(tree):
             for child in ast.iter_child_nodes(parent):
@@ -812,7 +822,8 @@ class TestStressFalsePositives:
 
     # Expanding without shift should still fire
     def test_t004_fires_on_bare_expanding(self):
-        _check(T004_ExpandingBeforeSplit(), "df['m'] = df['close'].expanding().mean()", expect_hit=True)
+        # Use non-temporal column name; temporal columns are now suppressed as causal
+        _check(T004_ExpandingBeforeSplit(), "df['m'] = df['val'].expanding().mean()", expect_hit=True)
 
 
 class TestStressMissedLeaks:

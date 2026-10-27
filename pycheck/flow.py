@@ -290,30 +290,49 @@ class TaintTracker:
             return left_taint or right_taint
         
         if isinstance(node, ast.Subscript):
-            # Subscript propagates taint from the value being indexed
-            val_taint = self._expr_taint(node.value)
-            if val_taint:
-                return val_taint
             obj_name = self._get_var_name(node.value)
-            # Check if accessing a tracked tainted column: df['feat'] or df[['feat']]
+
+            # --- Column-level dataflow: when accessing specific columns by name,
+            # only propagate taint from THAT column, not from sibling columns.
+            # This prevents df['safe_col'] from being flagged just because
+            # df['tainted_col'] exists. ---
+
             if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
                 col = node.slice.value
+                col_lower = col.lower()
+
+                # 1. Check if this specific column is tainted
                 if obj_name and f"{obj_name}.{col}" in self.tainted_vars:
                     return f"column '{col}' is tainted: {self.tainted_vars[f'{obj_name}.{col}'].reason}"
+
+                # 2. Check future-named columns
+                future_cols = {'future_price', 'future_return', 'next_close', 'next_price',
+                               'next_day', 'tomorrow', 'price_change_next_day', 'future_avg_price'}
+                if any(f in col_lower for f in future_cols):
+                    return f"accessing future-named column '{col}'"
+
+                # 3. Propagate only DIRECT variable-level taint (e.g. df = tainted.shift(-1)),
+                #    NOT column-derived taint from sibling columns
+                if obj_name and obj_name in self.tainted_vars:
+                    return self.tainted_vars[obj_name].reason
+                return None
+
             if isinstance(node.slice, (ast.List, ast.Tuple)):
+                # Multi-column access: check each column individually
                 for elt in node.slice.elts:
                     if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                         col = elt.value
                         if obj_name and f"{obj_name}.{col}" in self.tainted_vars:
                             return f"column '{col}' is tainted: {self.tainted_vars[f'{obj_name}.{col}'].reason}"
-            # Check if indexing a tainted column name
-            if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
-                col_lower = node.slice.value.lower()
-                # Only flag column names that unambiguously refer to future data.
-                future_cols = {'future_price', 'future_return', 'next_close', 'next_price',
-                               'next_day', 'tomorrow', 'price_change_next_day', 'future_avg_price'}
-                if any(f in col_lower for f in future_cols):
-                    return f"accessing future-named column '{node.slice.value}'"
+                # Only propagate direct variable-level taint
+                if obj_name and obj_name in self.tainted_vars:
+                    return self.tainted_vars[obj_name].reason
+                return None
+
+            # Non-column subscript (numeric index, slice, variable): propagate all parent taints
+            val_taint = self._expr_taint(node.value)
+            if val_taint:
+                return val_taint
         
         if isinstance(node, ast.Attribute):
             return self._expr_taint(node.value)
