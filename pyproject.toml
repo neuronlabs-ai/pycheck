@@ -13,12 +13,11 @@ authors = [
 license = { text = "MIT" }
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: Software Development :: Testing",
@@ -37,7 +36,7 @@ keywords = [
     "pandas", "sklearn", "scikit-learn", "uncertainty", "neuron",
     "ml-safety", "data-science", "feature-engineering"
 ]
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 dependencies = []
 
 [project.optional-dependencies]
