@@ -4,12 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycheck-neuron"
-version = "1.1.0"
+version = "1.1.2"
 description = "37-rule static AST analyzer catching temporal lookahead bias, causal confusion, and uncertainty bugs in Python ML code. Zero dependencies."
 readme = "README.md"
 authors = [
-    { name = "Fayo Ibrahim", email = "fayo@neuron-lab.org" },
-    { name = "NEURON Team" }
+    { name = "Fayo Ibrahim", email = "contact@neuron-lab.org" }
 ]
 license = "MIT"
 classifiers = [

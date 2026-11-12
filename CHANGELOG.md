@@ -4,6 +4,14 @@ All notable changes to `pycheck-neuron` are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.2] — 2026-11-12
+
+### Changed
+- **Author & Metadata Alignment**:
+  - Updated package author to Fayo Ibrahim (`contact@neuron-lab.org`).
+- **CI/CD Hardening**:
+  - Upgraded GitHub Actions runner matrix for Ubuntu 24.04 and decoupled test requirements from packaging tools.
+
 ## [1.1.0] — 2026-10-27
 
 ### Added
